@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英語クイズアプリ</title>
+    <!-- 安全性の高いCDN（Cloudflare）に変更、crossorigin属性を削除 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.3/babel.min.js"></script>
+    <style>
+      .btn-3d { border-bottom-width: 8px; transition: transform 0.1s, border-width 0.1s, filter 0.3s; }
+      .btn-3d:active:not(:disabled) { transform: translateY(6px); border-bottom-width: 2px; }
+      .btn-wrong { opacity: 0.4; transform: scale(0.96); filter: grayscale(80%); pointer-events: none; }
+      .btn-correct { animation: correct-pop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; z-index: 10; }
+      @keyframes correct-pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); box-shadow: 0 0 40px rgba(255, 255, 255, 0.8); }
+        100% { transform: scale(1.02); box-shadow: 0 0 20px rgba(255, 255, 255, 0.5); border-bottom-width: 8px; }
+      }
+      .glass-panel { background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <!-- プログラムが起動するまでのプレースホルダー / エラー表示領域 -->
+        <div style="text-align: center; padding: 50px; font-family: sans-serif; background: #e0e7ff; min-height: 100vh;">
+            <h2 style="color: #4c1d95; font-size: 24px; font-weight: bold;">🚀 アプリを読み込み中...</h2>
+            <p style="color: #4b5563; margin-top: 10px;">画面が切り替わらない場合は、ブラウザの設定でスクリプトがブロックされているか、<br>コードにエラーがある可能性があります。</p>
+            <pre id="error-log" style="color: #dc2626; text-align: left; background: #fee2e2; padding: 20px; border-radius: 8px; margin-top: 20px; white-space: pre-wrap; font-size: 14px; display: none;"></pre>
+        </div>
+    </div>
+
+    <script>
+        // エラーを画面に表示するための仕組み（真っ白になるのを防ぐ）
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            var log = document.getElementById('error-log');
+            if(log) {
+                log.style.display = 'block';
+                log.innerText += '【エラーが発生しました】\n' + msg + '\n行番号: ' + lineNo + '\n';
+            }
+            return false;
+        };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // アイコン群
+        const Timer = (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="14" r="8"/><path d="M12 2v4"/><path d="M12 14 9.5 11.5"/><path d="M15 2h-6"/></svg>;
+        const Trophy = (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>;
+        const Target = (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
+        const AlertCircle = (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>;
+        const BookOpen = (props) => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>;
+
+        const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzLanCzRiH5cWaWgkw30LdLs9zjmXPYb8_fBpFMSfRHIjdfr7ukdY1m_a5ZtJ98zPeq/exec";
+
+        const OPTION_COLORS = [
+            { bg: 'bg-rose-500', border: 'border-rose-700' }, { bg: 'bg-blue-500', border: 'border-blue-700' },
+            { bg: 'bg-amber-400', border: 'border-amber-600' }, { bg: 'bg-emerald-500', border: 'border-emerald-700' }
+        ];
+
+        const DUMMY_WORDS = [
+            { unit: "01-U1", part: "1-L1", en: "make friends", ja: "友達を作る", pos: "フレーズ", definition: "" },
+            { unit: "01-U1", part: "1-L1", en: "anime", ja: "(日本の)アニメ", pos: "名", definition: "Japanese animation for television and films" },
+            { unit: "01-U1", part: "1-L1", en: "dialect", ja: "(地域)方言", pos: "名", definition: "a form of a language spoken in a particular area" },
+            { unit: "01-U1", part: "1-L1", en: "unique", ja: "特有の", pos: "形", definition: "being the only existing one of its type" }
+        ];
+
+        const shuffleArray = (array) => [...array].sort(() => Math.random() - 0.5);
+        const calculateTimeLimit = (q) => q <= 10 ? 45 : q <= 20 ? 60 : q <= 30 ? 75 : 90;
+
+        const App = () => {
+            const [gameState, setGameState] = useState('loading');
+            const [allWords, setAllWords] = useState([]);
+            const [selectedUnit, setSelectedUnit] = useState("");
+            const [selectedPart, setSelectedPart] = useState("");
+            const [mode, setMode] = useState('ja-en');
+            const [errorMsg, setErrorMsg] = useState("");
+            
+            const [wordPool, setWordPool] = useState([]);
+            const [currentQuestion, setCurrentQuestion] = useState(null);
+            const [timeLeft, setTimeLeft] = useState(0);
+            const [totalTime, setTotalTime] = useState(0);
+            const [score, setScore] = useState({ correct: 0, wrong: 0 });
+            const [selectedWrongOptions, setSelectedWrongOptions] = useState([]);
+            const [isTransitioning, setIsTransitioning] = useState(false);
+
+            useEffect(() => {
+                const fetchWords = async () => {
+                    try {
+                        const res = await fetch(GAS_WEB_APP_URL);
+                        if (!res.ok) throw new Error();
+                        const data = await res.json();
+                        setAllWords(data);
+                        setGameState('menu');
+                    } catch (e) {
+                        setErrorMsg("GASからのデータ取得に失敗しました。アクセス権限が「全員」になっているか確認してください。(現在はデモデータで動作中です)");
+                        setAllWords(DUMMY_WORDS);
+                        setGameState('menu');
+                    }
+                };
+                fetchWords();
+            }, []);
+
+            const units = useMemo(() => [...new Set(allWords.map(w => w.unit))], [allWords]);
+            useEffect(() => { if (units.length > 0 && !selectedUnit) setSelectedUnit(units[0]); }, [units, selectedUnit]);
+
+            const partsInUnit = useMemo(() => [...new Set(allWords.filter(w => w.unit === selectedUnit).map(w => w.part))], [allWords, selectedUnit]);
+            useEffect(() => { setSelectedPart(partsInUnit.length > 0 ? partsInUnit[0] : ""); }, [selectedUnit, partsInUnit]);
+
+            useEffect(() => {
+                let timer;
+                if (gameState === 'playing' && timeLeft > 0) {
+                    timer = setInterval(() => setTimeLeft(prev => prev <= 1 ? (setGameState('result'), 0) : prev - 1), 1000);
+                }
+                return () => clearInterval(timer);
+            }, [gameState, timeLeft]);
+
+            const generateQuestion = (pool, targetWords) => {
+                let nextPool = [...pool];
+                if (nextPool.length === 0) nextPool = shuffleArray([...targetWords]);
+                const answerWord = nextPool.pop();
+                const otherWords = allWords.filter(w => w.en !== answerWord.en && (mode !== 'def-en' || (w.definition && w.definition.trim() !== "")));
+                const wrongChoices = shuffleArray(otherWords).slice(0, 3);
+                return { answerWord, options: shuffleArray([answerWord, ...wrongChoices]), nextPool };
+            };
+
+            const startGame = () => {
+                setErrorMsg("");
+                let targetWords = allWords.filter(w => w.unit === selectedUnit && w.part === selectedPart);
+                if (mode === 'def-en') targetWords = targetWords.filter(w => w.definition && w.definition.trim() !== "");
+                
+                if (targetWords.length < 4) {
+                    setErrorMsg('選ばれた範囲の単語数が少なすぎます（最低4つ必要です）。現在の対象単語数: ' + targetWords.length);
+                    return;
+                }
+                
+                const timeLimit = calculateTimeLimit(targetWords.length);
+                const { answerWord, options, nextPool } = generateQuestion([], targetWords);
+                
+                setWordPool(nextPool); setCurrentQuestion({ answerWord, options, targetWords });
+                setScore({ correct: 0, wrong: 0 }); setTimeLeft(timeLimit); setTotalTime(timeLimit);
+                setSelectedWrongOptions([]); setIsTransitioning(false); setGameState('playing');
+            };
+
+            const handleAnswer = (option) => {
+                if (isTransitioning) return;
+                if (option.en === currentQuestion.answerWord.en) {
+                    setScore(prev => ({ ...prev, correct: prev.correct + 1 })); setIsTransitioning(true);
+                    setTimeout(() => {
+                        setGameState(curr => {
+                            if (curr === 'playing') {
+                                const { answerWord, options, nextPool } = generateQuestion(wordPool, currentQuestion.targetWords);
+                                setWordPool(nextPool); setCurrentQuestion(prev => ({ ...prev, answerWord, options }));
+                                setSelectedWrongOptions([]); setIsTransitioning(false);
+                            }
+                            return curr;
+                        });
+                    }, 1000);
+                } else if (!selectedWrongOptions.some(o => o.en === option.en)) {
+                    setScore(prev => ({ ...prev, wrong: prev.wrong + 1 }));
+                    setSelectedWrongOptions(prev => [...prev, option]);
+                }
+            };
+
+            const accuracy = score.correct + score.wrong > 0 ? Math.round((score.correct / (score.correct + score.wrong)) * 100) : 0;
+            const finalScore = totalTime > 0 ? Math.max(0, Math.round(((score.correct * 100) - (score.wrong * 50)) * (60 / totalTime))) : 0;
+
+            return (
+                <div className="min-h-screen flex flex-col font-sans bg-gradient-to-br from-indigo-200 via-purple-200 to-pink-200 text-gray-800">
+                    <div className="bg-white/30 backdrop-blur-md border-b border-white/50 text-purple-900 p-4 md:p-6 text-center font-black text-3xl md:text-4xl shadow-sm z-10 tracking-widest uppercase flex items-center justify-center">
+                        <BookOpen className="mr-3 w-8 h-8" /> Word Master
+                    </div>
+                    <div className="flex-1 p-4 md:p-8 flex flex-col relative overflow-y-auto max-w-6xl mx-auto w-full">
+                        
+                        {gameState === 'loading' && (
+                            <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                                <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                                <div className="text-2xl font-bold text-purple-800">データを読み込み中...</div>
+                            </div>
+                        )}
+                        
+                        {gameState === 'menu' && (
+                            <div className="flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full space-y-8">
+                                <div className="text-center mb-4">
+                                    <h2 className="text-4xl md:text-5xl font-black text-purple-900 drop-shadow-sm">学習設定</h2>
+                                    <p className="text-purple-800 text-xl mt-3 font-bold">範囲と出題形式を選んでスタート！</p>
+                                </div>
+
+                                {errorMsg && (
+                                    <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-xl shadow-md font-bold text-sm md:text-base flex items-start">
+                                        <AlertCircle className="w-6 h-6 mr-2 flex-shrink-0" />
+                                        <p>{errorMsg}</p>
+                                    </div>
+                                )}
+
+                                <div className="space-y-6 glass-panel p-6 md:p-10 rounded-[2rem] shadow-xl border border-white/60">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+                                        <div className="space-y-2">
+                                            <label className="block text-xl font-bold text-gray-700">Unit (大単元)</label>
+                                            <select value={selectedUnit} onChange={(e) => setSelectedUnit(e.target.value)} className="w-full p-4 text-xl font-bold border-2 border-white/80 rounded-2xl bg-white/60 focus:ring-4 focus:ring-purple-200 focus:border-purple-400 outline-none cursor-pointer">
+                                                {units.map(u => <option key={u} value={u}>{u}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="block text-xl font-bold text-gray-700">パート (小単元)</label>
+                                            <select value={selectedPart} onChange={(e) => setSelectedPart(e.target.value)} disabled={partsInUnit.length === 0} className="w-full p-4 text-xl font-bold border-2 border-white/80 rounded-2xl bg-white/60 focus:ring-4 focus:ring-purple-200 focus:border-purple-400 outline-none cursor-pointer disabled:opacity-50">
+                                                {partsInUnit.map(p => <option key={p} value={p}>{p}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3 pt-6 border-t border-purple-200/50">
+                                        <label className="block text-xl font-bold text-gray-700">出題形式</label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+                                            <button onClick={() => setMode('ja-en')} className={`p-4 md:p-5 rounded-2xl border-4 font-black text-lg md:text-xl transition-all ${mode === 'ja-en' ? 'border-purple-400 bg-purple-100/80 text-purple-800 shadow-md transform scale-[1.02]' : 'border-white/80 bg-white/50 text-gray-600 hover:bg-white/80 hover:border-gray-200'}`}><div className="text-sm font-bold opacity-70 mb-1">日本語の意味から</div>英単語を当てる</button>
+                                            <button onClick={() => setMode('en-ja')} className={`p-4 md:p-5 rounded-2xl border-4 font-black text-lg md:text-xl transition-all ${mode === 'en-ja' ? 'border-purple-400 bg-purple-100/80 text-purple-800 shadow-md transform scale-[1.02]' : 'border-white/80 bg-white/50 text-gray-600 hover:bg-white/80 hover:border-gray-200'}`}><div className="text-sm font-bold opacity-70 mb-1">英単語から</div>日本語を当てる</button>
+                                            <button onClick={() => setMode('def-en')} className={`p-4 md:p-5 rounded-2xl border-4 font-black text-lg md:text-xl transition-all ${mode === 'def-en' ? 'border-emerald-400 bg-emerald-100/80 text-emerald-800 shadow-md transform scale-[1.02]' : 'border-white/80 bg-white/50 text-gray-600 hover:bg-white/80 hover:border-gray-200'}`}><div className="text-sm font-bold opacity-70 mb-1">英英定義から</div>英単語を当てる</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button onClick={startGame} className="w-full mt-8 bg-gradient-to-b from-yellow-300 to-orange-400 hover:brightness-110 text-white font-black text-3xl py-6 rounded-[2rem] shadow-xl btn-3d border-orange-500 tracking-wider text-shadow">スタート！ 🚀</button>
+                            </div>
+                        )}
+
+                        {gameState === 'playing' && currentQuestion && (
+                            <div className="flex-1 flex flex-col w-full h-full">
+                                <div className="flex justify-between items-center mb-4 md:mb-6 glass-panel p-4 md:p-5 rounded-3xl shadow-md border border-white/60">
+                                    <div className="text-purple-800 font-black bg-purple-200/50 px-6 py-2.5 rounded-2xl text-xl md:text-2xl shadow-sm border border-purple-200/50 flex items-center"><Trophy className="w-6 h-6 mr-2 text-purple-600" /> {score.correct}</div>
+                                    <div className={`font-black text-2xl md:text-3xl flex items-center px-6 py-2.5 rounded-2xl shadow-sm border ${timeLeft <= 10 ? 'bg-red-400/90 text-white border-red-500 animate-pulse' : 'bg-white/60 text-gray-800 border-white/80'}`}><Timer className="w-7 h-7 mr-2" /> {timeLeft}</div>
+                                </div>
+                                <div className="flex-1 flex flex-col items-center justify-center mb-6 glass-panel rounded-[2.5rem] shadow-xl border border-white/60 p-6 md:p-12 min-h-[200px]">
+                                    {mode !== 'def-en' && <div className="text-base md:text-lg text-purple-700 font-black mb-4 bg-purple-200/60 px-5 py-1.5 rounded-full border border-purple-300/50 shadow-sm">{currentQuestion.answerWord.pos}</div>}
+                                    {mode === 'ja-en' && <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black text-gray-800 text-center break-words w-full tracking-tight drop-shadow-sm">{currentQuestion.answerWord.ja}</h2>}
+                                    {mode === 'en-ja' && <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black text-gray-800 text-center break-words w-full tracking-tight drop-shadow-sm">{currentQuestion.answerWord.en}</h2>}
+                                    {mode === 'def-en' && <h2 className="text-xl sm:text-2xl md:text-4xl lg:text-5xl font-bold text-gray-800 text-center break-words w-full leading-relaxed drop-shadow-sm">"{currentQuestion.answerWord.definition}"</h2>}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 mt-auto">
+                                    {currentQuestion.options.map((option, idx) => {
+                                        const c = OPTION_COLORS[idx % 4];
+                                        let btnClass = `relative w-full p-6 md:p-10 rounded-[2rem] font-black text-2xl sm:text-3xl md:text-5xl flex items-center justify-center break-words text-white shadow-lg btn-3d ${c.bg} ${c.border} `;
+                                        if (isTransitioning) {
+                                            if (option.en === currentQuestion.answerWord.en) btnClass += " btn-correct ring-4 ring-white ring-offset-4 ring-offset-transparent";
+                                            else btnClass += " btn-wrong";
+                                        } else if (selectedWrongOptions.some(o => o.en === option.en)) {
+                                            btnClass += " btn-wrong";
+                                        } else {
+                                            btnClass += " hover:brightness-110";
+                                        }
+                                        return <button key={idx} onClick={() => handleAnswer(option)} disabled={isTransitioning || selectedWrongOptions.some(o => o.en === option.en)} className={btnClass}><span className="drop-shadow-md">{mode === 'en-ja' ? option.ja : option.en}</span></button>;
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {gameState === 'result' && (
+                            <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center max-w-4xl mx-auto w-full">
+                                <div><h2 className="text-6xl md:text-7xl font-black text-purple-900 mb-4 tracking-tight drop-shadow-md">TIME UP! 🏁</h2><p className="text-purple-800 text-2xl md:text-3xl font-bold">お疲れ様でした！</p></div>
+                                <div className="glass-panel w-full p-8 md:p-14 rounded-[3rem] border border-white/60 shadow-xl">
+                                    <div className="text-xl md:text-2xl text-purple-900/70 font-black mb-2 uppercase tracking-widest">Score (1分間換算)</div>
+                                    <div className="text-8xl md:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 via-pink-500 to-purple-600 mb-12 drop-shadow-sm filter">{finalScore}</div>
+                                    <div className="grid grid-cols-2 gap-4 md:gap-8 text-left">
+                                        <div className="bg-white/70 p-6 md:p-8 rounded-3xl border-2 border-green-200/80 flex flex-col items-center justify-center col-span-2 sm:col-span-1 shadow-sm backdrop-blur-sm"><span className="text-green-700 text-xl font-black mb-2 flex items-center"><Target className="w-6 h-6 mr-2"/> 正解数</span><span className="font-black text-gray-800 text-5xl md:text-6xl">{score.correct}<span className="text-2xl ml-2 text-gray-500">問</span></span></div>
+                                        <div className="bg-white/70 p-6 md:p-8 rounded-3xl border-2 border-red-200/80 flex flex-col items-center justify-center col-span-2 sm:col-span-1 shadow-sm backdrop-blur-sm"><span className="text-red-600 text-xl font-black mb-2 flex items-center"><AlertCircle className="w-6 h-6 mr-2"/> ミス回数</span><span className="font-black text-gray-800 text-5xl md:text-6xl">{score.wrong}<span className="text-2xl ml-2 text-gray-500">回</span></span></div>
+                                        <div className="bg-white/70 p-6 md:p-8 rounded-3xl border-2 border-blue-200/80 flex flex-col items-center justify-center col-span-2 shadow-sm backdrop-blur-sm"><span className="text-blue-600 text-xl font-black mb-2 uppercase tracking-wider">Accuracy</span><span className="font-black text-blue-600 text-6xl md:text-7xl">{accuracy}<span className="text-4xl ml-2">%</span></span></div>
+                                    </div>
+                                </div>
+                                <button onClick={() => { setErrorMsg(""); setGameState('menu'); }} className="w-full mt-10 bg-purple-900 hover:bg-purple-800 text-white font-black text-2xl md:text-3xl py-6 md:py-8 rounded-[2rem] shadow-xl btn-3d border-purple-950 tracking-wider transition-all">メニューに戻る ↩️</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
